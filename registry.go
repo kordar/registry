@@ -1,5 +1,8 @@
+package registry
+
 type Registry interface {
+	Listener()
 	Register() error
-	Listener() error
-	Get() error
+	Get() (interface{}, error)
+	Remove() error
 }
