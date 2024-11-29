@@ -1,67 +1,65 @@
 package registry
 
 import (
-	"encoding/json"
-	"github.com/g4zhuj/hashring"
-	"github.com/spf13/cast"
+	"fmt"
+	"github.com/kordar/hashring"
 )
 
 type HashringRegistry struct {
-	count map[string]int
-	hash  *hashring.HashRing
-	node  string
+	count    map[string]int
+	hashring *hashring.HashRing
+	node     string
 }
 
 func NewHashringRegistry(spots int, node string) HashringRegistry {
 	return HashringRegistry{
-		count: map[string]int{},
-		hash:  hashring.NewHashRing(spots),
-		node:  node,
+		count:    map[string]int{},
+		hashring: hashring.NewHashRing(spots),
+		node:     node,
 	}
 }
 
-func (h *HashringRegistry) Load(values []string) {
+func (h *HashringRegistry) Load(values []string, f func(v interface{}) (string, int, []string)) {
 	weights := map[string]int{}
+	tmp := map[string]int{}
 	for _, value := range values {
-		var tempMap map[string]interface{}
-		err := json.Unmarshal([]byte(value), &tempMap)
-		if err != nil {
+		id, w, nodes := f(value)
+		if id == "" {
 			continue
 		}
-		node := cast.ToString(tempMap["node"])
-		// 1:remove, 2:add, 3:none
-		if h.count[node] == 0 {
-			h.count[node] = 2
-		} else if h.count[node] == 1 {
-			h.count[node] = 3
+		if nodes == nil || len(nodes) == 0 {
+			weights[id] = w
+			tmp[id]++
+		} else {
+			for _, node := range nodes {
+				key := fmt.Sprintf("%s:%s", id, node)
+				weights[key] = w
+				tmp[key]++
+			}
 		}
-
-		weights[node] = cast.ToInt(tempMap["weight"])
 	}
 
-	tmp := map[string]int{}
-	for n, v := range h.count {
-		if v == 1 {
-			h.hash.RemoveNode(n)
-			continue
+	for k := range h.count {
+		if _, exists := tmp[k]; !exists {
+			h.hashring.RemoveNode(k)
 		}
-		if v == 2 {
-			w := 1
-			if weights[n] != 0 {
-				w = weights[n]
-			}
-			h.hash.AddNode(n, w)
+	}
+
+	for k, v := range tmp {
+		w := 1
+		if weights[k] != 0 {
+			w = weights[k]
 		}
-		tmp[n] = 1
+		h.hashring.AddNode(k, w*v)
 	}
 
 	h.count = tmp
 }
 
 func (h *HashringRegistry) GetNode(key string) string {
-	return h.hash.GetNode(key)
+	return h.hashring.GetNode(key)
 }
 
 func (h *HashringRegistry) Can(key string) bool {
-	return h.hash.GetNode(key) == h.node
+	return h.hashring.GetNode(key) == h.node
 }
